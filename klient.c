@@ -1,33 +1,30 @@
+#include "salon.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <semaphore.h>
 
-#define MAX_FOTELE 3  // Ilość dostępnych foteli w salonie
+void *klient(void *arg) {
+    int id = (long)arg;
 
-pthread_mutex_t mutex_fotele = PTHREAD_MUTEX_INITIALIZER;
-int wolne_fotele = MAX_FOTELE;
+    pthread_mutex_lock(&mutex_kolejka);
+    if (klienci_w_poczekalni < LICZBA_FOTELI) {
+        klienci_w_poczekalni++;
+        printf("🪑 Klient %d przyszedł do salonu. Miejsca w poczekalni: %d\n", id, klienci_w_poczekalni);
+        printf("🔄 Aktualny stan: klienci: %d, kasa: %d zł\n", klienci_w_poczekalni, kasa);
+        pthread_mutex_unlock(&mutex_kolejka);
 
-void *klient(void *id) {
-    int klient_id = (intptr_t) id;
+        sem_post(&sem_klienci);  // Powiadamiamy fryzjera
 
-    printf("Klient %d przyszedl do salonu.\n", klient_id);
+        sem_wait(&sem_fotele);  // Klient czeka na fotel
+        printf("💺 Klient %d siada na fotelu.\n", id);
+        sleep(1);  // Klient czeka na zakończenie strzyżenia
 
-    pthread_mutex_lock(&mutex_fotele);
-    if (wolne_fotele > 0) {
-        wolne_fotele--;
-        printf("Klient %d zajmuje fotel. Wolne fotele: %d\n", klient_id, wolne_fotele);
-        pthread_mutex_unlock(&mutex_fotele);
-
-        sleep(rand() % 3 + 1); // Czas strzyżenia
-
-        pthread_mutex_lock(&mutex_fotele);
-        wolne_fotele++;
-        printf("Klient %d skonczyl strzyzenie i wychodzi. Wolne fotele: %d\n", klient_id, wolne_fotele);
-        pthread_mutex_unlock(&mutex_fotele);
+        printf("🚶 Klient %d wychodzi.\n", id);
     } else {
-        printf("Klient %d odchodzi - brak miejsc w poczekalni.\n", klient_id);
-        pthread_mutex_unlock(&mutex_fotele);
+        pthread_mutex_unlock(&mutex_kolejka);
+        printf("❌ Klient %d odchodzi - brak miejsc w poczekalni.\n", id);
     }
 
     return NULL;
