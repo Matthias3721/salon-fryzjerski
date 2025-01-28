@@ -14,19 +14,19 @@ void *fryzjer(void *arg) {
         klienci_w_poczekalni--;
         pthread_mutex_unlock(&mutex_kolejka);
 
-        printf("💇 Fryzjer %d obsługuje klienta. Klienci w poczekalni: %d\n", id, klienci_w_poczekalni);
+        printf("Fryzjer %d obsługuje klienta. Klienci w poczekalni: %d\n", id, klienci_w_poczekalni);
         sleep(2);
 
         pthread_mutex_lock(&mutex_kasa);
         kasa += 20;
-        printf("💰 Fryzjer %d: Klient zapłacił. Stan kasy: %d zł\n", id, kasa);
-        printf("🔄 Aktualny stan: klienci: %d, kasa: %d zł\n", klienci_w_poczekalni, kasa);
+        printf("Fryzjer %d: Klient zapłacił. Stan kasy: %d zł\n", id, kasa);
+        printf("Aktualny stan: klienci: %d, kasa: %d zł\n", klienci_w_poczekalni, kasa);
         pthread_mutex_unlock(&mutex_kasa);
 
-        printf("✂️ Fryzjer %d skończył strzyżenie.\n", id);
+        printf("Fryzjer %d skończył strzyżenie.\n", id);
         sem_post(&sem_fotele);
     }
 
-    printf("❌ Fryzjer %d kończy pracę.\n", id);
+    printf("Fryzjer %d kończy pracę.\n", id);
     return NULL;
 }

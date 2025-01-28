@@ -7,9 +7,9 @@
 #include <semaphore.h>
 #include <unistd.h>
 
-#define LICZBA_FRYZJERÓW 50
-#define LICZBA_KLIENTÓW 300
-#define LICZBA_FOTELI 200
+#define LICZBA_FRYZJERÓW 2
+#define LICZBA_KLIENTÓW 10
+#define LICZBA_FOTELI 3
 
 extern sem_t sem_fotele;
 extern sem_t sem_klienci;

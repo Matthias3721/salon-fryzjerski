@@ -11,7 +11,7 @@ int salon_otwarty = 1;
 
 void *kierownik(void *arg) {
     sleep(5);  // Czas działania salonu
-    printf("🔴 Kierownik zamyka salon!\n");
+    printf("Kierownik zamyka salon!\n");
 
     salon_otwarty = 0;
 
@@ -20,7 +20,7 @@ void *kierownik(void *arg) {
         sem_post(&sem_klienci);
     }
 
-    printf("💰 📊 Ostateczny stan: klienci w poczekalni: %d, kasa: %d zł\n", klienci_w_poczekalni, kasa);
+    printf("Ostateczny stan: klienci w poczekalni: %d, kasa: %d zł\n", klienci_w_poczekalni, kasa);
     
     return NULL;
 }
@@ -33,24 +33,24 @@ int main() {
     sem_init(&sem_fotele, 0, LICZBA_FOTELI);
     sem_init(&sem_klienci, 0, 0);
 
-    printf("💈 Salon fryzjerski otwarty!\n");
+    printf("Salon fryzjerski otwarty!\n");
 
     pthread_create(&manager, NULL, kierownik, NULL);
 
     
     // Tworzenie wątków fryzjerów
     for (int i = 0; i < LICZBA_FRYZJERÓW; i++) {
-    printf("🔄 Tworzenie fryzjera %d\n", i);
+    printf("Tworzenie fryzjera %d\n", i);
     if (pthread_create(&fryzjerzy[i], NULL, fryzjer, (void *)(long)i) != 0) {
-        perror("❌ Błąd tworzenia fryzjera");
+        perror("Błąd tworzenia fryzjera");
         }
     }
 
     // Tworzenie wątków klientów
     for (int i = 0; i < LICZBA_KLIENTÓW; i++) {
-        printf("🔄 Tworzenie klienta %d\n", i);
+        printf("Tworzenie klienta %d\n", i);
         if (pthread_create(&klienci[i], NULL, klient, (void *)(long)i) != 0) {
-            perror("❌ Błąd tworzenia klienta");
+            perror("Błąd tworzenia klienta");
         }
         usleep(10000);  // Zapobiega nagłemu obciążeniu systemu
     }
@@ -71,8 +71,8 @@ int main() {
     sem_destroy(&sem_fotele);
     sem_destroy(&sem_klienci);
 
-    printf("💰 Stan kasy na koniec dnia: %d zł\n", kasa);
-    printf("🚪 Salon fryzjerski zamyka się!\n");
+    printf("Stan kasy na koniec dnia: %d zł\n", kasa);
+    printf("Salon fryzjerski zamyka się!\n");
 
     return 0;
 }
