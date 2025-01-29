@@ -1,12 +1,13 @@
 CC = gcc
 CFLAGS = -Wall -pthread
+OBJ = main.o fryzjer.o klient.o
 
-OBJS = main.o fryzjer.o klient.o
+all: salon
 
-salon: $(OBJS)
-	$(CC) $(CFLAGS) -o salon $(OBJS)
+salon: $(OBJ)
+	$(CC) $(CFLAGS) -o salon $(OBJ)
 
-%.o: %.c
+%.o: %.c salon.h
 	$(CC) $(CFLAGS) -c $<
 
 clean:

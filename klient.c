@@ -1,31 +1,30 @@
 #include "salon.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <pthread.h>
-#include <semaphore.h>
 
-void *klient(void *arg) {
-    int id = (long)arg;
+void klient(int id) {
+    struct sembuf blokada_kolejki = { SEM_MUTEX_KOLEJKA, -1, 0 };
+    struct sembuf odblokowanie_kolejki = { SEM_MUTEX_KOLEJKA, 1, 0 };
+    struct sembuf wysylanie_klienta = { SEM_KLIENCI, 1, 0 };
 
-    pthread_mutex_lock(&mutex_kolejka);
-    if (klienci_w_poczekalni < LICZBA_FOTELI) {
-        klienci_w_poczekalni++;
-        printf("Klient %d przyszedł do salonu. Miejsca w poczekalni: %d\n", id, klienci_w_poczekalni);
-        printf("Aktualny stan: klienci: %d, kasa: %d zł\n", klienci_w_poczekalni, kasa);
-        pthread_mutex_unlock(&mutex_kolejka);
+    semop(semid, &blokada_kolejki, 1);  // Blokada dostępu do poczekalni
 
-        sem_post(&sem_klienci);  // Powiadamiamy fryzjera
+    if (salon_dane->klienci_w_poczekalni < LICZBA_FOTELI) {
+        salon_dane->klienci_w_poczekalni++;
+        printf("Klient %d przyszedł do salonu. Klienci w poczekalni: %d\n", id, salon_dane->klienci_w_poczekalni);
+        
+        semop(semid, &odblokowanie_kolejki, 1);  // Odblokowanie dostępu do poczekalni
+        semop(semid, &wysylanie_klienta, 1);    // Powiadomienie fryzjera
 
-        sem_wait(&sem_fotele);  // Klient czeka na fotel
+        struct sembuf czeka_na_fotel = { SEM_FOTELE, -1, 0 };
+        semop(semid, &czeka_na_fotel, 1);  // Czeka na fotel
+
         printf("Klient %d siada na fotelu.\n", id);
-        sleep(1);  // Klient czeka na zakończenie strzyżenia
+        sleep(1);  // Strzyzenie
 
         printf("Klient %d wychodzi.\n", id);
     } else {
-        pthread_mutex_unlock(&mutex_kolejka);
+        semop(semid, &odblokowanie_kolejki, 1);  // Odblokowanie poczekalni
         printf("Klient %d odchodzi - brak miejsc w poczekalni.\n", id);
     }
 
-    return NULL;
+    exit(0);
 }

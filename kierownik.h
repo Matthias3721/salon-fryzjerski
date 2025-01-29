@@ -1,6 +1,6 @@
 #ifndef KIEROWNIK_H
 #define KIEROWNIK_H
 
-void *kierownik_salon(void *arg);
+void kierownik();
 
 #endif

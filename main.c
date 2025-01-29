@@ -1,110 +1,116 @@
 #include "salon.h"
-#include <signal.h>
+#include <sys/wait.h>
 
-sem_t sem_fotele;
-sem_t sem_klienci;
-pthread_mutex_t mutex_kasa = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t mutex_kolejka = PTHREAD_MUTEX_INITIALIZER;
 
-int kasa = 100; // Początkowa kwota w kasie
-int klienci_w_poczekalni = 0;
-volatile sig_atomic_t salon_otwarty = 1; // 'volatile' zapewnia poprawne działanie w sygnałach
+int shm_id;
+ShmSalon *salon_dane;
+int semid;
 
-pthread_t fryzjerzy[LICZBA_FRYZJERÓW];
-pthread_t klienci[LICZBA_KLIENTÓW];
-pthread_t manager;
-
+// Obsluga sygnalu SIGNINT
 void sigint_handler(int signum) {
-    printf("\nOtrzymano SIGINT! Zamykanie salonu natychmiast...\n");
-    salon_otwarty = 0;
-
-    // Odblokowanie semaforów, aby zakończyć czekające wątki
-    for (int i = 0; i < LICZBA_FRYZJERÓW; i++) {
-        sem_post(&sem_klienci);
-    }
-
-    // Anulowanie wątków klientów i fryzjerów
-    for (int i = 0; i < LICZBA_FRYZJERÓW; i++) {
-        pthread_cancel(fryzjerzy[i]);
-    }
-    for (int i = 0; i < LICZBA_KLIENTÓW; i++) {
-        pthread_cancel(klienci[i]);
-    }
-
-    pthread_cancel(manager); // Zakończenie wątku kierownika
-
-    sem_destroy(&sem_fotele);
-    sem_destroy(&sem_klienci);
-
-    printf("\nOstateczny stan: klienci w poczekalni: %d, kasa: %d zł\n", klienci_w_poczekalni, kasa);
-    printf("Salon fryzjerski zamknięty!\n");
+    printf("\nOtrzymano SIGINT! Zamykanie salonu...\n");
+    salon_dane->salon_otwarty = 0;
     
-    exit(0); // Natychmiastowe zakończenie programu
+    // powiadomienie fryzjerow o zamknięciu
+    for (int i = 0; i < LICZBA_FRYZJERÓW; i++) {
+        semop(semid, &(struct sembuf){ SEM_KLIENCI, 1, 0 }, 1);
+    }
+
+    cleanup_ipc();
+    exit(0);
 }
 
-void *kierownik(void *arg) {
-    sleep(5);  // Czas działania salonu
-    printf("Kierownik zamyka salon!\n");
-
-    salon_otwarty = 0;
-
-    for (int i = 0; i < LICZBA_FRYZJERÓW; i++) {
-        sem_post(&sem_klienci);
+// Funkcja inicjalizujaca mechanizmy IPC
+void setup_ipc() {
+    key_t key = ftok(".", 'X');                                     // Tworzy unikalny klucz do mechanizmow IPC
+    shm_id = shmget(key, sizeof(ShmSalon), IPC_CREAT | 0666);       // Tworzy segment pamieci współdzielonej
+    if (shm_id == -1) {
+        perror("Błąd tworzenia pamięci współdzielonej");
+        exit(1);
     }
 
-    printf("Ostateczny stan: klienci w poczekalni: %d, kasa: %d zł\n", klienci_w_poczekalni, kasa);
-    return NULL;
+    // przylacza pamięć wspoldzielona do przestrzeni adresowej procesu
+    salon_dane = (ShmSalon *)shmat(shm_id, NULL, 0);
+    if (salon_dane == (void *)-1) {
+        perror("Błąd przydzielania pamięci współdzielonej");
+        exit(1);
+    }
+
+    salon_dane->kasa = 100;
+    salon_dane->klienci_w_poczekalni = 0;
+    salon_dane->salon_otwarty = 1;
+
+    semid = semget(key, 4, IPC_CREAT | 0666);
+    if (semid == -1) {
+        perror("Błąd tworzenia semaforów");
+        exit(1);
+    }
+
+    // Inicjalizacja wartości semaforów
+    semctl(semid, SEM_FOTELE, SETVAL, LICZBA_FOTELI);            // Semafor określający liczbę dostępnych foteli
+    semctl(semid, SEM_KLIENCI, SETVAL, 0);                       // Semafor oczekujących klientów (początkowo 0)
+    semctl(semid, SEM_KASA, SETVAL, 1);                          // Mutex do synchronizacji dostępu do kasy
+    semctl(semid, SEM_MUTEX_KOLEJKA, SETVAL, 1);                 // Mutex do synchronizacji dostępu do kolejki klientów
+
+}
+
+void cleanup_ipc() {
+    shmdt(salon_dane);
+    shmctl(shm_id, IPC_RMID, NULL);
+    semctl(semid, 0, IPC_RMID);
+    printf("IPC usunięte poprawnie.\n");
+}
+
+// Funkcja kierownika
+void kierownik() {
+    sleep(10);
+    printf("Kierownik zamyka salon!\n");
+    salon_dane->salon_otwarty = 0;                                // Ustawia flagę oznaczającą zamknięcie salonu
+
+    for (int i = 0; i < LICZBA_FRYZJERÓW; i++) {                  // informuje fryzjerów, aby zakończyli pracę
+        semop(semid, &(struct sembuf){ SEM_KLIENCI, 1, 0 }, 1);
+    }
+
+    printf("Kasa: %d zł\n", salon_dane->kasa);
+    cleanup_ipc();
+    exit(0);
 }
 
 int main() {
-    struct sigaction sa;
-    sa.sa_handler = sigint_handler;
-    sa.sa_flags = 0;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGINT, &sa, NULL);
-
-    sem_init(&sem_fotele, 0, LICZBA_FOTELI);
-    sem_init(&sem_klienci, 0, 0);
+    signal(SIGINT, sigint_handler);
+    setup_ipc();
 
     printf("Salon fryzjerski otwarty!\n");
 
-    pthread_create(&manager, NULL, kierownik, NULL);
+    // Tworzenie procesu dla kierownika
+    pid_t kierownik_pid = fork();
+    if (kierownik_pid == 0) {
+        kierownik();
+    }
 
-    // Tworzenie wątków fryzjerów
+    // Tworzenie procesow fryzjerow
     for (int i = 0; i < LICZBA_FRYZJERÓW; i++) {
-        if (pthread_create(&fryzjerzy[i], NULL, fryzjer, (void *)(long)i) != 0) {
-            perror("Błąd tworzenia fryzjera");
+    pid_t pid = fork();
+    if (pid == 0) { // Proces potomny - fryzjer
+        fryzjer(i); // Przekazujemy i jako ID fryzjera
+        exit(0);
         }
     }
 
-    // Tworzenie wątków klientów
+    // Tworzenie procesow klientow
     for (int i = 0; i < LICZBA_KLIENTÓW; i++) {
-        if (pthread_create(&klienci[i], NULL, klient, (void *)(long)i) != 0) {
-            perror("Błąd tworzenia klienta");
+    pid_t pid = fork();
+    if (pid == 0) { // Proces potomny - klient
+        klient(i); // Przekazujemy i jako ID klienta
+        exit(0);
         }
-        usleep(10000); // Zapobiega nagłemu obciążeniu systemu
     }
 
-    // Oczekiwanie na zakończenie wszystkich klientów
-    for (int i = 0; i < LICZBA_KLIENTÓW; i++) {
-        pthread_join(klienci[i], NULL);
+
+    for (int i = 0; i < LICZBA_KLIENTÓW + LICZBA_FRYZJERÓW + 1; i++) {
+        wait(NULL);
     }
 
-    // Oczekiwanie na zakończenie fryzjerów
-    for (int i = 0; i < LICZBA_FRYZJERÓW; i++) {
-        pthread_join(fryzjerzy[i], NULL);
-    }
-
-    pthread_join(manager, NULL);
-
-    sem_destroy(&sem_fotele);
-    sem_destroy(&sem_klienci);
-
-    pthread_mutex_destroy(&mutex_kasa);
-    pthread_mutex_destroy(&mutex_kolejka);
-
-    printf("Stan kasy na koniec dnia: %d zł\n", kasa);
-    printf("Salon fryzjerski zamyka się!\n");
-
+    printf("Salon fryzjerski zamknięty!\n");
     return 0;
 }
