@@ -1,14 +1,20 @@
 CC = gcc
-CFLAGS = -Wall -pthread
-OBJ = main.o fryzjer.o klient.o
+CFLAGS = -Wall -std=c99 -pthread
 
-all: salon
+# Lista plików źródłowych
+SOURCES = main.c fryzjer.c klient.c kierownik.c
+OBJECTS = $(SOURCES:.c=.o)
+TARGET = salon-fryzjerski
 
-salon: $(OBJ)
-	$(CC) $(CFLAGS) -o salon $(OBJ)
+all: $(TARGET)
 
-%.o: %.c salon.h
+$(TARGET): $(OBJECTS)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJECTS) -lrt
+
+%.o: %.c wspolne.h
 	$(CC) $(CFLAGS) -c $<
 
 clean:
-	rm -f *.o salon
+	rm -rf $(OBJECTS) $(TARGET)
+
+.PHONY: all clean

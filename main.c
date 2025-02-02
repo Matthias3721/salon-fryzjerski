@@ -1,116 +1,146 @@
-#include "salon.h"
+#include "wspolne.h"
 #include <sys/wait.h>
+#include <string.h>
+#include <sys/prctl.h>  // do ustawiania nazwy procesu
 
+// Deklaracje funkcji z pozostałych modułów
+void fryzjer_process(int fryzjer_nr);
+void klient_process();
+void kierownik_process(int czas_symulacji);
 
-int shm_id;
-ShmSalon *salon_dane;
-int semid;
+int main(int argc, char *argv[]) {
+    // Ustawienie nazwy procesu na "glowny"
+    prctl(PR_SET_NAME, "glowny", 0, 0, 0);
 
-// Obsluga sygnalu SIGNINT
-void sigint_handler(int signum) {
-    printf("\nOtrzymano SIGINT! Zamykanie salonu...\n");
-    salon_dane->salon_otwarty = 0;
+    int liczba_fryzjerow = LICZBA_FRYZJEROW;
+    int pojemnosc_poczekalni = POJEMNOSC_POCZEKALNI;
+    int czas_symulacji = CZAS_SYMULACJI;
+    int liczba_klientow = LICZBA_KLIENTOW; // domyślna liczba klientów
+
+    // Jeśli jako pierwszy argument podamy liczbę klientów, używamy jej
+    if(argc >= 2) {
+        liczba_klientow = atoi(argv[1]);
+        if(liczba_klientow <= 0) {
+            fprintf(stderr, "Podaj dodatnia liczbe klientow.\n");
+            exit(EXIT_FAILURE);
+        }
+    }
     
-    // powiadomienie fryzjerow o zamknięciu
-    for (int i = 0; i < LICZBA_FRYZJERÓW; i++) {
-        semop(semid, &(struct sembuf){ SEM_KLIENCI, 1, 0 }, 1);
+    // Tworzymy obszar pamięci współdzielonej
+    int shm_fd = shm_open(SHM_NAZWA, O_CREAT | O_RDWR, 0666);
+    if(shm_fd == -1) {
+        perror("shm_open");
+        exit(EXIT_FAILURE);
     }
-
-    cleanup_ipc();
-    exit(0);
-}
-
-// Funkcja inicjalizujaca mechanizmy IPC
-void setup_ipc() {
-    key_t key = ftok(".", 'X');                                     // Tworzy unikalny klucz do mechanizmow IPC
-    shm_id = shmget(key, sizeof(ShmSalon), IPC_CREAT | 0666);       // Tworzy segment pamieci współdzielonej
-    if (shm_id == -1) {
-        perror("Błąd tworzenia pamięci współdzielonej");
-        exit(1);
+    if(ftruncate(shm_fd, sizeof(wspolne_t)) == -1) {
+        perror("ftruncate");
+        exit(EXIT_FAILURE);
     }
-
-    // przylacza pamięć wspoldzielona do przestrzeni adresowej procesu
-    salon_dane = (ShmSalon *)shmat(shm_id, NULL, 0);
-    if (salon_dane == (void *)-1) {
-        perror("Błąd przydzielania pamięci współdzielonej");
-        exit(1);
+    wspolne_t *wspolne = mmap(NULL, sizeof(wspolne_t), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if(wspolne == MAP_FAILED) {
+        perror("mmap");
+        exit(EXIT_FAILURE);
     }
-
-    salon_dane->kasa = 100;
-    salon_dane->klienci_w_poczekalni = 0;
-    salon_dane->salon_otwarty = 1;
-
-    semid = semget(key, 4, IPC_CREAT | 0666);
-    if (semid == -1) {
-        perror("Błąd tworzenia semaforów");
-        exit(1);
+    
+    // Inicjalizacja danych w pamięci współdzielonej
+    wspolne->banknot10 = 1000;
+    wspolne->banknot20 = 1000;  // więcej banknotów 20, aby ułatwić wydawanie reszty
+    wspolne->banknot50 = 1000;
+    wspolne->banknot100 = 0;
+    wspolne->glowa_kolejki = 0;
+    wspolne->ogon_kolejki = 0;
+    wspolne->liczba_klientow = 0;
+    wspolne->rozmiar_kolejki = pojemnosc_poczekalni;
+    wspolne->liczba_fryzjerow = 0;
+    wspolne->salon_otwarty = 1;
+    wspolne->next_client_number = 1;
+    
+    // Tworzymy semafory
+    sem_t *sem_kolejka_mutex = sem_open(SEM_KOLEJKA_MUTEX, O_CREAT, 0666, 1);
+    if(sem_kolejka_mutex == SEM_FAILED) {
+        perror("sem_open sem_kolejka_mutex");
+        exit(EXIT_FAILURE);
     }
-
-    // Inicjalizacja wartości semaforów
-    semctl(semid, SEM_FOTELE, SETVAL, LICZBA_FOTELI);            // Semafor określający liczbę dostępnych foteli
-    semctl(semid, SEM_KLIENCI, SETVAL, 0);                       // Semafor oczekujących klientów (początkowo 0)
-    semctl(semid, SEM_KASA, SETVAL, 1);                          // Mutex do synchronizacji dostępu do kasy
-    semctl(semid, SEM_MUTEX_KOLEJKA, SETVAL, 1);                 // Mutex do synchronizacji dostępu do kolejki klientów
-
-}
-
-void cleanup_ipc() {
-    shmdt(salon_dane);
-    shmctl(shm_id, IPC_RMID, NULL);
-    semctl(semid, 0, IPC_RMID);
-    printf("IPC usunięte poprawnie.\n");
-}
-
-// Funkcja kierownika
-void kierownik() {
-    sleep(10);
-    printf("Kierownik zamyka salon!\n");
-    salon_dane->salon_otwarty = 0;                                // Ustawia flagę oznaczającą zamknięcie salonu
-
-    for (int i = 0; i < LICZBA_FRYZJERÓW; i++) {                  // informuje fryzjerów, aby zakończyli pracę
-        semop(semid, &(struct sembuf){ SEM_KLIENCI, 1, 0 }, 1);
+    sem_t *sem_klientow_czeka = sem_open(SEM_KLIENTOW_CZEKA, O_CREAT, 0666, 0);
+    if(sem_klientow_czeka == SEM_FAILED) {
+        perror("sem_open sem_klientow_czeka");
+        exit(EXIT_FAILURE);
     }
-
-    printf("Kasa: %d zł\n", salon_dane->kasa);
-    cleanup_ipc();
-    exit(0);
-}
-
-int main() {
-    signal(SIGINT, sigint_handler);
-    setup_ipc();
-
-    printf("Salon fryzjerski otwarty!\n");
-
-    // Tworzenie procesu dla kierownika
-    pid_t kierownik_pid = fork();
-    if (kierownik_pid == 0) {
-        kierownik();
+    sem_t *sem_kasa = sem_open(SEM_KASA, O_CREAT, 0666, 1);
+    if(sem_kasa == SEM_FAILED) {
+        perror("sem_open sem_kasa");
+        exit(EXIT_FAILURE);
     }
-
-    // Tworzenie procesow fryzjerow
-    for (int i = 0; i < LICZBA_FRYZJERÓW; i++) {
-    pid_t pid = fork();
-    if (pid == 0) { // Proces potomny - fryzjer
-        fryzjer(i); // Przekazujemy i jako ID fryzjera
-        exit(0);
+    
+    // Tworzymy procesy fryzjerów
+    pid_t pid;
+    for (int i = 0; i < liczba_fryzjerow; i++) {
+        pid = fork();
+        if(pid < 0) {
+            perror("fork fryzjera");
+            exit(EXIT_FAILURE);
+        } else if(pid == 0) {
+            int my_fryzjer_nr = i + 1;
+            fryzjer_process(my_fryzjer_nr);
+            exit(EXIT_SUCCESS);
+        } else {
+            wspolne->fryzjerowie[i] = pid;
+            wspolne->liczba_fryzjerow++;
         }
     }
-
-    // Tworzenie procesow klientow
-    for (int i = 0; i < LICZBA_KLIENTÓW; i++) {
-    pid_t pid = fork();
-    if (pid == 0) { // Proces potomny - klient
-        klient(i); // Przekazujemy i jako ID klienta
-        exit(0);
+    
+    // Tworzymy proces kierownika (uruchamiamy go równolegle)
+    pid = fork();
+    if(pid < 0) {
+        perror("fork kierownika");
+        exit(EXIT_FAILURE);
+    } else if(pid == 0) {
+        kierownik_process(czas_symulacji);
+        exit(EXIT_SUCCESS);
+    }
+    
+    // Pętla tworząca klientów – działamy tylko przez czas symulacji
+    time_t start = time(NULL);
+    int client_count = 0;
+    while(client_count < liczba_klientow && difftime(time(NULL), start) < czas_symulacji) {
+        pid = fork();
+        if(pid < 0) {
+            perror("fork klienta");
+        } else if(pid == 0) {
+            klient_process();
+            exit(EXIT_SUCCESS);
         }
+        client_count++;
+        usleep(10000);
     }
-
-
-    for (int i = 0; i < LICZBA_KLIENTÓW + LICZBA_FRYZJERÓW + 1; i++) {
-        wait(NULL);
-    }
-
-    printf("Salon fryzjerski zamknięty!\n");
+    
+    // Po upływie czasu symulacji zamykamy salon
+    wspolne->salon_otwarty = 0;
+    printf("Glowny: Salon zostal zamkniety dla nowych klientow.\n");
+    
+    // Oczekujemy na zakończenie procesów dzieci
+    int status;
+    while(wait(&status) > 0);
+    
+    // Obliczamy łączną kwotę w kasie
+    int suma = wspolne->banknot10 * 10 + wspolne->banknot20 * 20 + wspolne->banknot50 * 50 + wspolne->banknot100 * 100;
+    printf("Stan kasy:\n");
+    printf("  banknot10: %d\n", wspolne->banknot10);
+    printf("  banknot20: %d\n", wspolne->banknot20);
+    printf("  banknot50: %d\n", wspolne->banknot50);
+    printf("  banknot100: %d\n", wspolne->banknot100);
+    printf("Lacznie: %d zl\n", suma);
+    
+    // Sprzątamy: zamykamy i usuwamy semafory oraz pamięć współdzieloną
+    sem_close(sem_kolejka_mutex);
+    sem_unlink(SEM_KOLEJKA_MUTEX);
+    sem_close(sem_klientow_czeka);
+    sem_unlink(SEM_KLIENTOW_CZEKA);
+    sem_close(sem_kasa);
+    sem_unlink(SEM_KASA);
+    
+    munmap(wspolne, sizeof(wspolne_t));
+    shm_unlink(SHM_NAZWA);
+    
     return 0;
 }

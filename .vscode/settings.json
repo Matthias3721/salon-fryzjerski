@@ -1,5 +1,8 @@
 {
     "files.associations": {
-        "stdlib.h": "c"
+        "stdlib.h": "c",
+        "wait.h": "c",
+        "semaphore.h": "c",
+        "time.h": "c"
     }
 }
