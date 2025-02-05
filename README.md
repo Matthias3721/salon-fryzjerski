@@ -119,9 +119,18 @@ System może być skonfigurowany do obsługi bardzo dużej liczby klientów i fr
 Nawet przy dużej liczbie procesów system działa stabilnie, a obciążenie CPU i pamięci RAM pozostaje na akceptowalnym poziomie (należy jednak pamiętać o limitach systemowych dla procesów).
 ________________________________________
 5. Kluczowe fragmenty kodu
-
+•	Tworzenie i obsługa pamięci współdzielonej
 https://github.com/Matthias3721/salon-fryzjerski/blob/5bfe0f71b3dccbc193c1f0b1bff090b3c9013c7a/wspolne.h#L2C1-L66C7
-
+Ten fragment definiuje wszystkie dane współdzielone przez procesy: stan kasy, kolejkę klientów oraz listę fryzjerów. Ustawienia takie jak liczba fryzjerów, poczekalnia, czas symulacji i liczba klientów są skonfigurowane tutaj.
+•	Tworzenie procesów (fork, exit, wait)
+https://github.com/Matthias3721/salon-fryzjerski/blob/5bfe0f71b3dccbc193c1f0b1bff090b3c9013c7a/main.c#L75C5-L115C6
+Powyższy fragment pokazuje, jak za pomocą funkcji fork() tworzone są procesy fryzjerów, klientów oraz kierownika. W procesie rodzica używane jest wait(), aby poczekać na zakończenie wszystkich procesów potomnych.
+•	Obsługa sygnałów (sigaction, signal, kill)
+https://github.com/Matthias3721/salon-fryzjerski/blob/5bfe0f71b3dccbc193c1f0b1bff090b3c9013c7a/fryzjer.c#L14C5-L23C30
+Ten fragment kodu ustawia obsługę sygnału SIGUSR1 dla fryzjera przy pomocy funkcji sigaction(), co umożliwia fryzjerowi odpowiednią reakcję (ustawienie flagi zakończenia pracy). Dodatkowo, inne sygnały, które nie dotyczą fryzjera, są ignorowane.
+•	Synchronizacja przy użyciu semaforów
+https://github.com/Matthias3721/salon-fryzjerski/blob/5bfe0f71b3dccbc193c1f0b1bff090b3c9013c7a/main.c#L59C4-L73C6
+Ten fragment pokazuje, jak tworzone są semafory, które synchronizują dostęp do kolejki klientów (SEM_KOLEJKA_MUTEX), sygnalizują obecność klientów (SEM_KLIENTOW_CZEKA) oraz chronią operacje na kasie (SEM_KASA).
 
 ________________________________________
 6. Możliwe ulepszenia
