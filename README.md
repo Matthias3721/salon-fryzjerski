@@ -120,6 +120,7 @@ Nawet przy dużej liczbie procesów system działa stabilnie, a obciążenie CPU
 ________________________________________
 5. Kluczowe fragmenty kodu
 
+https://github.com/Matthias3721/salon-fryzjerski/blob/5bfe0f71b3dccbc193c1f0b1bff090b3c9013c7a/wspolne.h#L2C1-L66C7
 
 
 ________________________________________
